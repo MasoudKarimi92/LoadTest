@@ -1,4 +1,5 @@
 ﻿using Confluent.Kafka;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace KafkaTest;
 public class MessageConsumer
@@ -11,18 +12,20 @@ public class MessageConsumer
         _bootstrapServers = bootstrapServers;
     }
 
-    public async Task load(string topicName, int number, int workers)
+    public async Task load(string topicName, int number, int workers, string[] partitions)
     {
         List<int> keys = Enumerable.Range(1, number).ToList();
         await Parallel.ForEachAsync(keys, new ParallelOptions() { MaxDegreeOfParallelism = workers },
         (item, cancelToken) =>
         {
-            return Consume(topicName + "_" + item.ToString());
+            int numberOfPartitions = 1;
+            int.TryParse(partitions[item - 1], out numberOfPartitions);
+            return Consume(topicName + "_" + item.ToString(), numberOfPartitions);
         });
     }
 
 
-    private async ValueTask Consume(string topic)
+    private async ValueTask Consume(string topic, int partitions)
     {
         var config = new ConsumerConfig
         {
@@ -38,36 +41,41 @@ public class MessageConsumer
             cts.Cancel();
         };
 
-        using (var consumer = new ConsumerBuilder<string, string>(
-            config).SetLogHandler((_, message) => LogCallBack(message, config)).Build())
+        List<int> keys = Enumerable.Range(1, partitions).ToList();
+        Parallel.ForEach(keys, key =>
         {
-            consumer.Subscribe(topic);
-            try
+            using (var consumer = new ConsumerBuilder<string, string>(
+                        config).SetLogHandler((_, message) => LogCallBack(message, config)).Build())
             {
-                int counter = 0;
-                while (true)
+                consumer.Subscribe(topic);
+                try
                 {
-                    Interlocked.Increment(ref counter);
-                    var cr = consumer.Consume(cts.Token);
-                    if (counter % 1000 == 0)
-                        Console.WriteLine($"Consumed event from topic {topic} value {cr.Message.Value}");
+                    int counter = 0;
+                    while (!Console.KeyAvailable)
+                    {
+                        Interlocked.Increment(ref counter);
+                        var cr = consumer.Consume(cts.Token);
+                        if (counter % 1000 == 0)
+                            Console.WriteLine($"Consumed event from topic {topic} and partiotion {cr.Partition.Value} value {cr.Message.Value}");
 
+                    }
+                }
+
+                catch (OperationCanceledException)
+                {
+                    // Ctrl-C was pressed.
+                }
+                catch (Exception)
+                {
+
+                }
+                finally
+                {
+                    consumer.Close();
                 }
             }
 
-            catch (OperationCanceledException)
-            {
-                // Ctrl-C was pressed.
-            }
-            catch (Exception)
-            {
-
-            }
-            finally
-            {
-                consumer.Close();
-            }
-        }
+        });
     }
 
     private static void LogCallBack(LogMessage message, ConsumerConfig config)
