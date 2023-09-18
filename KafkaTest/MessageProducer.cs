@@ -26,34 +26,41 @@ public class MessageProducer
     {
         var config = new ProducerConfig
         {
-            BootstrapServers = _bootstrapServers
+            BootstrapServers = _bootstrapServers,
+            QueueBufferingMaxMessages = 1000_000_000
         };
 
         using (var producer = new ProducerBuilder<string, string>(
            config).Build())
         {
-            int counter = 0;
-            while (!Console.KeyAvailable)
+            try
             {
-                var message = $"test_kafka_{topic}_{Guid.NewGuid().ToString()}";
-                producer.Produce(topic, new Message<string, string> { Key = null, Value = message },
-                    (deliveryReport) =>
-                    {
-                        if (deliveryReport.Error.Code != ErrorCode.NoError)
+                int counter = 0;
+                while (!Console.KeyAvailable)
+                {
+                    var message = $"test_kafka_{topic}_{Guid.NewGuid().ToString()}";
+                    producer.Produce(topic, new Message<string, string> { Value = message },
+                        (deliveryReport) =>
                         {
-                            Console.WriteLine($"Failed to deliver message: {deliveryReport.Error.Reason}");
-                        }
-                        else
-                        {
-                            Interlocked.Increment(ref counter);
-                            if (counter % 1000 == 0)
-                                Console.WriteLine($"Produced event to topic {topic}: value = {message}");
+                            if (deliveryReport.Error.Code != ErrorCode.NoError)
+                            {
+                                Console.WriteLine($"Failed to deliver message: {deliveryReport.Error.Reason}");
+                            }
+                            else
+                            {
+                                Interlocked.Increment(ref counter);
+                                if (counter % 1000 == 0)
+                                    Console.WriteLine($"Produced event to topic {topic}: value = {message}");
 
-                        }
-                    });
+                            }
+                        });
+                }
+                producer.Flush(TimeSpan.FromSeconds(5));
             }
-
-            producer.Flush(TimeSpan.FromSeconds(10));
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in producer: {ex}");
+            }
         }
     }
 }
